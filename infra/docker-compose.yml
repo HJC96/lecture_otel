@@ -1,0 +1,143 @@
+services:
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest # contrib 버전은 많은 기능이 포함되어 있음
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics
+    depends_on:
+      - tempo
+    networks:
+      - otel-network
+
+  # Grafana Tempo
+  tempo:
+    image: grafana/tempo:latest
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP
+      - "4317"        # OTLP gRPC, 호스트를 안넣은건 외부에서 접근 불가능하게 하기 위함임.
+    networks:
+      - otel-network
+    user: "0:0"  # Run as root to avoid permission issues
+
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    depends_on:
+      - tempo
+    networks:
+      - otel-network
+
+  # User Service
+  user-service:
+    build:
+      context: ../user-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      # Tempo 트레이싱 핵심 설정
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=user-service
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=user-service,service.version=1.0.0
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+      # 서비스 간 통신
+      - ORDER_SERVICE_URL=http://order-service:8082
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+
+  # Order Service
+  order-service:
+    build:
+      context: ../order-service
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      # Tempo 트레이싱 핵심 설정
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=order-service
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=order-service,service.version=1.0.0
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+      # 서비스 간 통신
+      - PAYMENT_SERVICE_URL=http://payment-service:8083
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+
+  # Payment Service
+  payment-service:
+    build:
+      context: ../payment-service
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      # Tempo 트레이싱 핵심 설정
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=payment-service
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=payment-service,service.version=1.0.0
+      - OTEL_METRICS_EXPORTER=none
+      - OTEL_LOGS_EXPORTER=none
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+
+# ── 이름 있는 볼륨(named volume) 선언 ─────────────────────────────
+# 컨테이너를 지우면 그 안에 쓴 파일도 같이 사라진다.
+# 볼륨은 데이터를 컨테이너 바깥에 따로 보관해서 재시작해도 남게 한다.
+#
+# 위 서비스의 volumes를 보면 두 가지가 섞여 있다.
+#   ./tempo.yaml:/etc/tempo.yaml  → './'로 시작 = 호스트 파일을 직접 연결(bind mount). 선언 불필요
+#   tempo-data:/tmp/tempo         → 이름만 적음 = Docker가 알아서 보관. 여기에 선언이 있어야 함
+#
+#   docker compose down      → 볼륨 유지 (데이터 살아있음)
+#   docker compose down -v   → 볼륨까지 삭제 (데이터 날아감)
+volumes:
+  tempo-data:      # Tempo가 저장한 트레이스 (/tmp/tempo)
+  grafana-data:    # Grafana에서 만든 대시보드·계정 (/var/lib/grafana)
+  # 이름 뒤가 비어 있는 건 "전부 기본값으로 만들어라"라는 뜻. 빠뜨린 게 아니다.
+
+# ── 네트워크 선언 ───────────────────────────────────────────────
+# 같은 네트워크에 있는 컨테이너끼리는 '서비스 이름'을 주소로 서로를 찾을 수 있다.
+# Docker가 이 네트워크에 DNS를 붙여줘서, 서비스 이름을 컨테이너 IP로 바꿔주기 때문이다.
+# IP는 재시작할 때마다 바뀌지만 서비스 이름은 그대로라 설정에 적어둘 수 있다.
+#
+# 그래서 설정 파일들에 localhost나 IP 대신 이렇게 쓸 수 있다:
+#   otel-collector-config.yaml → endpoint: tempo:4317
+#   grafana-datasources.yaml   → url: http://tempo:3200
+#   user-service 환경변수      → http://order-service:8082
+#
+# driver: bridge = 한 대의 호스트 안에서 컨테이너끼리 묶는 기본 방식.
+#                  (여러 대의 서버를 묶을 때는 overlay를 쓴다)
+networks:
+  otel-network:
+    driver: bridge
