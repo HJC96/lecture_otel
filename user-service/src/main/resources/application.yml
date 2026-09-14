@@ -1,0 +1,15 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+
+# External service URLs
+order:
+  service:
+    url: ${ORDER_SERVICE_URL:http://localhost:8082}
+
+logging:
+  level:
+    com.example.userservice: DEBUG

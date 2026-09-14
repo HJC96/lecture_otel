@@ -27,6 +27,6 @@ storage:
     backend: local
     local:
       path: /tmp/tempo/blocks
-    pools:
+    pool:
       max_workers: 100
       queue_depth: 10000

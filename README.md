@@ -51,7 +51,7 @@ flowchart LR
 
 - Tempo의 4317은 호스트에 열지 않았다 — 트레이스는 **반드시 Collector를 거치게** 하려는 의도.
 - Collector의 **8889는 Prometheus용 메트릭 포트인데, 지금은 열려만 있다.** compose에 Prometheus 컨테이너가 없고 `otel-collector-config.yaml`의 prometheus receiver도 주석 처리돼 있다. 앱도 `OTEL_METRICS_EXPORTER=none`이라 이번 실습은 **트레이스만** 다룬다.
-- `../user-service` 등을 build context로 쓰므로 세 서비스는 이 저장소와 같은 상위 폴더에 있어야 한다.
+- 서비스 빌드는 컨테이너 안에서 `./gradlew build -x test` 로 돌아간다. **로컬에 Gradle·JDK 없어도 되고 Docker만 있으면 된다.**
 
 ---
 

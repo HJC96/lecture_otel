@@ -1,0 +1,15 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: order-service
+
+# External service URLs
+payment:
+  service:
+    url: ${PAYMENT_SERVICE_URL:http://localhost:8083}
+
+logging:
+  level:
+    com.example.orderservice: DEBUG
